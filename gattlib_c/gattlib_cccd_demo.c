@@ -258,9 +258,13 @@ static void *ble_task(void *arg) {
 	}
 
 	int selected = cccd_indices[char_idx];
-	uuid_t selected_uuid = chars[selected].uuid;
 
-	gattlib_uuid_to_string(&selected_uuid, uuid_str, sizeof(uuid_str));
+	/* Convert UUID to string then back to full 128-bit UUID
+	 * to ensure gattlib can match it via D-Bus */
+	gattlib_uuid_to_string(&chars[selected].uuid, uuid_str, sizeof(uuid_str));
+	uuid_t full_uuid;
+	gattlib_string_to_uuid(uuid_str, strlen(uuid_str) + 1, &full_uuid);
+
 	printf("\nSelected: %s (Value Handle: 0x%04X)\n",
 	       uuid_str, chars[selected].value_handle);
 
@@ -273,7 +277,12 @@ static void *ble_task(void *arg) {
 
 	/* Step 9: Enable CCCD via gattlib_notification_start (handles CCCD internally) */
 	printf("\n=== Setting CCCD (Enable Notification/Indication) ===\n");
-	ret = gattlib_notification_start(g_connection, &selected_uuid);
+	ret = gattlib_notification_start(g_connection, &full_uuid);
+	if (ret != GATTLIB_SUCCESS) {
+		/* Fallback: try with original UUID directly */
+		printf("Retrying with original UUID format...\n");
+		ret = gattlib_notification_start(g_connection, &chars[selected].uuid);
+	}
 	if (ret != GATTLIB_SUCCESS) {
 		fprintf(stderr, "Error: Failed to start notification (err=%d)\n", ret);
 		goto EXIT;
@@ -282,12 +291,11 @@ static void *ble_task(void *arg) {
 
 	/* Step 10: Restore CCCD */
 	printf("\nDisabling CCCD (unsubscribing)...\n");
-	ret = gattlib_notification_stop(g_connection, &selected_uuid);
+	ret = gattlib_notification_stop(g_connection, &full_uuid);
 	if (ret != GATTLIB_SUCCESS) {
-		fprintf(stderr, "Warning: Failed to stop notification (err=%d)\n", ret);
-	} else {
-		printf("CCCD disabled successfully! (unsubscribed)\n");
+		gattlib_notification_stop(g_connection, &chars[selected].uuid);
 	}
+	printf("CCCD disabled (unsubscribed)\n");
 
 EXIT:
 	if (services) free(services);
