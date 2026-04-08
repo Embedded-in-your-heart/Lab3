@@ -5,25 +5,38 @@
 ## 環境需求
 
 - Raspberry Pi 3（或其他支援 BLE 的 Linux 主機）
-- Python 3
-- bluepy 套件
+- Python 3.8+
+- [uv](https://docs.astral.sh/uv/) 套件管理工具
 - Android 手機安裝 BLE Tool（或 BLE Scanner by Bluepixel）
 
-### 安裝 bluepy
+### 系統相依套件
+
+bluepy 需要 `libglib2.0-dev`，先安裝：
 
 ```bash
-sudo apt-get install python3-pip libglib2.0-dev
-sudo pip3 install bluepy
+sudo apt-get install libglib2.0-dev
 ```
 
-## 程式說明
+### 使用 uv 安裝
+
+```bash
+# 安裝 uv（如尚未安裝）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 建立虛擬環境並安裝相依套件
+uv sync
+```
+
+## 執行程式
+
+BLE 操作需要 root 權限，使用 `sudo` 搭配 uv：
 
 ### ble_scan_conn.py - 基礎掃描與連線
 
 掃描附近 BLE 裝置，連線後讀取指定 Service (0xFFF0) 的 Characteristic (0xFFF1)。
 
 ```bash
-sudo python3 ble_scan_conn.py
+sudo uv run python ble_scan_conn.py
 ```
 
 操作步驟：
@@ -37,7 +50,7 @@ sudo python3 ble_scan_conn.py
 示範設定 CCCD (Client Characteristic Configuration Descriptor) 值為 0x0002（啟用 Indication）。
 
 ```bash
-sudo python3 ble_cccd_demo.py
+sudo uv run python ble_cccd_demo.py
 ```
 
 操作步驟：
