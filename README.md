@@ -27,6 +27,27 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
+### 藍牙初始化
+
+執行前需確保藍牙 adapter 正常運作：
+
+```bash
+# 解除 RF-kill（若藍牙被軟體封鎖）
+sudo rfkill unblock bluetooth
+
+# 啟動並重置藍牙 adapter
+sudo hciconfig hci0 up
+sudo hciconfig hci0 reset
+```
+
+給 bluepy-helper 設定必要的權限（只需執行一次）：
+
+```bash
+sudo setcap 'cap_net_raw,cap_net_admin+eip' .venv/lib/python3.13/site-packages/bluepy/bluepy-helper
+```
+
+> 若 Python 版本不同，請將路徑中的 `python3.13` 替換為實際版本。
+
 ## 執行程式
 
 BLE 操作需要 root 權限。先用 `uv sync` 建好環境，再透過 `sudo` 直接呼叫虛擬環境的 Python：
