@@ -1,0 +1,17 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+uv.lock
+
+# C build artifacts
+gattlib_c/gattlib_cccd_demo
+gattlib_c/*.o
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
