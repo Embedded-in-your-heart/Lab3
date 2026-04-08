@@ -49,16 +49,8 @@ static int g_conn_error = -1;
 static gattlib_adapter_t *g_adapter = NULL;
 
 static void sigint_handler(int sig) {
-	printf("\n\nCaught SIGINT, cleaning up...\n");
-	if (g_connection != NULL) {
-		gattlib_disconnect(g_connection, false);
-		g_connection = NULL;
-	}
-	if (g_adapter != NULL) {
-		gattlib_adapter_close(g_adapter);
-		g_adapter = NULL;
-	}
-	exit(0);
+	printf("\n\nCaught SIGINT, force exit.\n");
+	_exit(0);
 }
 
 /**
