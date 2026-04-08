@@ -29,14 +29,18 @@ uv sync
 
 ## 執行程式
 
-BLE 操作需要 root 權限，使用 `sudo` 搭配 uv：
+BLE 操作需要 root 權限。先用 `uv sync` 建好環境，再透過 `sudo` 直接呼叫虛擬環境的 Python：
+
+```bash
+uv sync
+```
 
 ### ble_scan_conn.py - 基礎掃描與連線
 
 掃描附近 BLE 裝置，連線後讀取指定 Service (0xFFF0) 的 Characteristic (0xFFF1)。
 
 ```bash
-sudo uv run python ble_scan_conn.py
+sudo .venv/bin/python ble_scan_conn.py
 ```
 
 操作步驟：
@@ -50,7 +54,7 @@ sudo uv run python ble_scan_conn.py
 示範設定 CCCD (Client Characteristic Configuration Descriptor) 值為 0x0002（啟用 Indication）。
 
 ```bash
-sudo uv run python ble_cccd_demo.py
+sudo .venv/bin/python ble_cccd_demo.py
 ```
 
 操作步驟：
