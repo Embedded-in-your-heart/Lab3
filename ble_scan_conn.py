@@ -12,7 +12,11 @@ class ScanDelegate(DefaultDelegate):
             print("Received new data from", dev.addr)
 
 scanner = Scanner().withDelegate(ScanDelegate())
-devices = scanner.scan(10.0)
+try:
+    devices = scanner.scan(10.0)
+except Exception as e:
+    # bluepy scan stop may raise spurious disconnect errors
+    devices = scanner.getDevices()
 
 addr = []
 for n, dev in enumerate(devices):

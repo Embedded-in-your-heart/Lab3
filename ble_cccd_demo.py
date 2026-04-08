@@ -48,7 +48,11 @@ def scan_devices(duration=10.0):
     """Scan for BLE devices and return the list."""
     print("=== Scanning for BLE devices (%d seconds) ===" % int(duration))
     scanner = Scanner().withDelegate(ScanDelegate())
-    devices = scanner.scan(duration)
+    try:
+        devices = scanner.scan(duration)
+    except Exception:
+        # bluepy scan stop may raise spurious disconnect errors
+        devices = scanner.getDevices()
 
     dev_list = []
     for i, dev in enumerate(devices):
