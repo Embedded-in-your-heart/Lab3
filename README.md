@@ -97,6 +97,48 @@ sudo .venv/bin/python ble_cccd_demo.py
 | 0x0001 | 啟用 Notification（不需 ACK） |
 | 0x0002 | 啟用 Indication（需 ACK） |
 
+## Option: GATTLIB C 語言版本（gattlib_c/）
+
+使用 [GATTLIB](https://github.com/labapart/gattlib) 以 C 語言實作 BLE CCCD 設定。
+
+### 安裝 GATTLIB
+
+```bash
+# 安裝相依套件
+sudo apt-get install cmake libbluetooth-dev libglib2.0-dev
+
+# 下載並編譯 gattlib
+git clone https://github.com/labapart/gattlib.git
+cd gattlib
+mkdir build && cd build
+cmake ..
+make
+sudo make install
+sudo ldconfig
+```
+
+### 編譯 C 程式
+
+```bash
+cd gattlib_c
+make
+```
+
+### 執行
+
+```bash
+sudo ./gattlib_cccd_demo
+```
+
+操作步驟：
+1. 開啟手機 BLE Tool App，啟動 Advertise
+2. 執行程式，等待掃描完成
+3. 輸入要連線的裝置編號
+4. 程式列出所有 Service 和 Characteristic
+5. 輸入 CCCD 的 handle（十六進位，例如 `005D`）
+6. 程式寫入 CCCD = 0x0002（Enable Indication）
+7. 按 `Ctrl+C` 停止，程式自動還原 CCCD = 0x0000
+
 ## 注意事項
 
 - 所有程式需要 `sudo` 權限（BLE 操作需要 root）
