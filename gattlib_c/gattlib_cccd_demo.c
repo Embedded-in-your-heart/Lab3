@@ -103,25 +103,15 @@ static void on_device_connect(gattlib_adapter_t *adapter, const char *dst,
 }
 
 /**
- * Write CCCD value to a given handle.
+ * Notification/indication callback (required by gattlib_register_notification).
  */
-static int write_cccd(gattlib_connection_t *conn, uint16_t cccd_handle,
-                       uint16_t value) {
-	uint8_t cccd_val[2];
-	cccd_val[0] = value & 0xFF;
-	cccd_val[1] = (value >> 8) & 0xFF;
-
-	printf("Writing CCCD value 0x%04X to handle 0x%04X... ", value, cccd_handle);
-	fflush(stdout);
-
-	int ret = gattlib_write_char_by_handle(conn, cccd_handle, cccd_val, 2);
-	if (ret != GATTLIB_SUCCESS) {
-		printf("FAILED (err=%d)\n", ret);
-		return -1;
+static void on_notification(const uuid_t *uuid, const uint8_t *data,
+                             size_t len, void *user_data) {
+	printf("[Indication] Data (%zu bytes): ", len);
+	for (size_t i = 0; i < len; i++) {
+		printf("%02X ", data[i]);
 	}
-
-	printf("OK\n");
-	return 0;
+	printf("\n");
 }
 
 /**
@@ -268,59 +258,36 @@ static void *ble_task(void *arg) {
 	}
 
 	int selected = cccd_indices[char_idx];
-	uint16_t value_handle = chars[selected].value_handle;
+	uuid_t selected_uuid = chars[selected].uuid;
 
-	/* Calculate CCCD handle:
-	 * CCCD is at value_handle + 1, unless Extended Properties exists,
-	 * then it's at value_handle + 2.
-	 * Check if next characteristic's handle leaves room. */
-	uint16_t cccd_handle;
-	if (selected + 1 < char_count) {
-		/* Gap between this char's value handle and next char's declaration */
-		uint16_t next_handle = chars[selected + 1].value_handle;
-		if (next_handle - value_handle >= 3) {
-			/* Room for Extended Properties + CCCD */
-			cccd_handle = value_handle + 2;
-		} else {
-			cccd_handle = value_handle + 1;
-		}
+	gattlib_uuid_to_string(&selected_uuid, uuid_str, sizeof(uuid_str));
+	printf("\nSelected: %s (Value Handle: 0x%04X)\n",
+	       uuid_str, chars[selected].value_handle);
+
+	/* Register notification handler */
+	ret = gattlib_register_notification(g_connection, on_notification, NULL);
+	if (ret != GATTLIB_SUCCESS) {
+		fprintf(stderr, "Error: Failed to register notification handler (err=%d)\n", ret);
+		goto EXIT;
+	}
+
+	/* Step 9: Enable CCCD via gattlib_notification_start (handles CCCD internally) */
+	printf("\n=== Setting CCCD (Enable Notification/Indication) ===\n");
+	ret = gattlib_notification_start(g_connection, &selected_uuid);
+	if (ret != GATTLIB_SUCCESS) {
+		fprintf(stderr, "Error: Failed to start notification (err=%d)\n", ret);
+		goto EXIT;
+	}
+	printf("CCCD set successfully! (subscribed)\n");
+
+	/* Step 10: Restore CCCD */
+	printf("\nDisabling CCCD (unsubscribing)...\n");
+	ret = gattlib_notification_stop(g_connection, &selected_uuid);
+	if (ret != GATTLIB_SUCCESS) {
+		fprintf(stderr, "Warning: Failed to stop notification (err=%d)\n", ret);
 	} else {
-		/* Last characteristic — use service end handle to check */
-		cccd_handle = value_handle + 1;
-		for (int i = 0; i < svc_count; i++) {
-			if (value_handle >= services[i].attr_handle_start &&
-			    value_handle <= services[i].attr_handle_end) {
-				if (services[i].attr_handle_end - value_handle >= 2) {
-					cccd_handle = value_handle + 2;
-				}
-				break;
-			}
-		}
+		printf("CCCD disabled successfully! (unsubscribed)\n");
 	}
-
-	gattlib_uuid_to_string(&chars[selected].uuid, uuid_str, sizeof(uuid_str));
-	printf("\nSelected: %s (Value Handle: 0x%04X, CCCD Handle: 0x%04X)\n",
-	       uuid_str, value_handle, cccd_handle);
-
-	/* Step 9: Write CCCD = 0x0002 (Enable Indication) */
-	printf("\n=== Setting CCCD to 0x0002 (Enable Indication) ===\n");
-	ret = write_cccd(g_connection, cccd_handle, CCCD_INDICATE);
-	if (ret != 0) {
-		/* Try fallback handle */
-		uint16_t alt = (cccd_handle == value_handle + 2) ?
-		               value_handle + 1 : value_handle + 2;
-		printf("Trying alternative handle 0x%04X...\n", alt);
-		ret = write_cccd(g_connection, alt, CCCD_INDICATE);
-		if (ret != 0) {
-			goto EXIT;
-		}
-		cccd_handle = alt;
-	}
-	printf("\n=== CCCD set to 0x0002 successfully! ===\n");
-
-	/* Step 10: Restore CCCD = 0x0000 */
-	printf("\nDisabling CCCD (setting to 0x0000)...\n");
-	write_cccd(g_connection, cccd_handle, CCCD_DISABLE);
 
 EXIT:
 	if (services) free(services);
