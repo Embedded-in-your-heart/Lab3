@@ -2,10 +2,12 @@
  * gattlib_cccd_demo.c
  *
  * BLE Central program using GATTLIB (C language).
- * Scans for BLE devices, connects to a selected device,
- * discovers services/characteristics, and sets CCCD to 0x0002 (Indication).
+ * Scans, connects, discovers services/characteristics,
+ * auto-detects CCCD-capable characteristics, and sets CCCD to 0x0002.
  *
- * Based on gattlib examples: ble_scan, discover, notification, read_write.
+ * Flow matches ble_cccd_demo.py:
+ *   scan -> select device -> connect -> discover -> auto-filter
+ *   NOTIFY/INDICATE chars -> select char -> write CCCD -> restore -> disconnect
  *
  * Build: make
  * Usage: sudo ./gattlib_cccd_demo
@@ -25,11 +27,11 @@
 #include "gattlib.h"
 
 #define MAX_DEVICES 64
+#define MAX_CHARS   64
 #define SCAN_TIMEOUT 10
 
 /* CCCD values */
 #define CCCD_DISABLE  0x0000
-#define CCCD_NOTIFY   0x0001
 #define CCCD_INDICATE 0x0002
 
 /* Scan results */
@@ -48,7 +50,6 @@ static gattlib_adapter_t *g_adapter = NULL;
 
 static void sigint_handler(int sig) {
 	printf("\n\nCaught SIGINT, cleaning up...\n");
-
 	if (g_connection != NULL) {
 		gattlib_disconnect(g_connection, false);
 		g_connection = NULL;
@@ -57,7 +58,6 @@ static void sigint_handler(int sig) {
 		gattlib_adapter_close(g_adapter);
 		g_adapter = NULL;
 	}
-
 	exit(0);
 }
 
@@ -91,7 +91,6 @@ static void on_device_discovered(gattlib_adapter_t *adapter, const char *addr,
 
 /**
  * Callback: connection established (or failed).
- * Called from gattlib internally after gattlib_connect().
  */
 static void on_device_connect(gattlib_adapter_t *adapter, const char *dst,
                                gattlib_connection_t *connection, int error,
@@ -104,59 +103,6 @@ static void on_device_connect(gattlib_adapter_t *adapter, const char *dst,
 }
 
 /**
- * Discover and print all services and characteristics.
- */
-static void discover_services(gattlib_connection_t *conn) {
-	gattlib_primary_service_t *services;
-	gattlib_characteristic_t *chars;
-	int svc_count, char_count;
-	char uuid_str[MAX_LEN_UUID_STR + 1];
-
-	printf("\n=== Services ===\n");
-	int ret = gattlib_discover_primary(conn, &services, &svc_count);
-	if (ret != GATTLIB_SUCCESS) {
-		fprintf(stderr, "Error: Service discovery failed (err=%d)\n", ret);
-		return;
-	}
-
-	for (int i = 0; i < svc_count; i++) {
-		gattlib_uuid_to_string(&services[i].uuid, uuid_str, sizeof(uuid_str));
-		printf("  service[%d] start:0x%04x end:0x%04x uuid:%s\n", i,
-		       services[i].attr_handle_start,
-		       services[i].attr_handle_end,
-		       uuid_str);
-	}
-	free(services);
-
-	printf("\n=== Characteristics ===\n");
-	ret = gattlib_discover_char(conn, &chars, &char_count);
-	if (ret != GATTLIB_SUCCESS) {
-		fprintf(stderr, "Error: Characteristic discovery failed (err=%d)\n", ret);
-		return;
-	}
-
-	for (int i = 0; i < char_count; i++) {
-		gattlib_uuid_to_string(&chars[i].uuid, uuid_str, sizeof(uuid_str));
-		printf("  char[%d] properties:%02x value_handle:0x%04x uuid:%s",
-		       i, chars[i].properties, chars[i].value_handle, uuid_str);
-
-		printf(" [");
-		if (chars[i].properties & GATTLIB_CHARACTERISTIC_READ)
-			printf(" READ");
-		if (chars[i].properties & GATTLIB_CHARACTERISTIC_WRITE)
-			printf(" WRITE");
-		if (chars[i].properties & GATTLIB_CHARACTERISTIC_WRITE_WITHOUT_RESP)
-			printf(" WRITE_NO_RESP");
-		if (chars[i].properties & GATTLIB_CHARACTERISTIC_NOTIFY)
-			printf(" NOTIFY");
-		if (chars[i].properties & GATTLIB_CHARACTERISTIC_INDICATE)
-			printf(" INDICATE");
-		printf(" ]\n");
-	}
-	free(chars);
-}
-
-/**
  * Write CCCD value to a given handle.
  */
 static int write_cccd(gattlib_connection_t *conn, uint16_t cccd_handle,
@@ -165,25 +111,28 @@ static int write_cccd(gattlib_connection_t *conn, uint16_t cccd_handle,
 	cccd_val[0] = value & 0xFF;
 	cccd_val[1] = (value >> 8) & 0xFF;
 
-	printf("\nWriting CCCD value 0x%04X to handle 0x%04X...\n",
-	       value, cccd_handle);
+	printf("Writing CCCD value 0x%04X to handle 0x%04X... ", value, cccd_handle);
+	fflush(stdout);
 
 	int ret = gattlib_write_char_by_handle(conn, cccd_handle, cccd_val, 2);
 	if (ret != GATTLIB_SUCCESS) {
-		fprintf(stderr, "Error: CCCD write failed (err=%d)\n", ret);
+		printf("FAILED (err=%d)\n", ret);
 		return -1;
 	}
 
-	printf("CCCD write successful!\n");
+	printf("OK\n");
 	return 0;
 }
 
 /**
  * Main BLE task — runs inside gattlib_mainloop thread.
- * This is the pattern used by all gattlib examples.
  */
 static void *ble_task(void *arg) {
 	gattlib_adapter_t *adapter;
+	gattlib_primary_service_t *services = NULL;
+	gattlib_characteristic_t *chars = NULL;
+	int svc_count, char_count;
+	char uuid_str[MAX_LEN_UUID_STR + 1];
 	int ret;
 
 	signal(SIGINT, sigint_handler);
@@ -237,7 +186,6 @@ static void *ble_task(void *arg) {
 		return NULL;
 	}
 
-	/* Wait for connection callback */
 	pthread_mutex_lock(&g_conn_mutex);
 	while (g_conn_error == -1) {
 		pthread_cond_wait(&g_conn_cond, &g_conn_mutex);
@@ -251,34 +199,135 @@ static void *ble_task(void *arg) {
 	}
 	printf("Connected!\n");
 
-	/* Step 5: Discover services and characteristics */
-	discover_services(g_connection);
+	/* Step 5: Discover services */
+	printf("\n=== Services ===\n");
+	ret = gattlib_discover_primary(g_connection, &services, &svc_count);
+	if (ret != GATTLIB_SUCCESS) {
+		fprintf(stderr, "Error: Service discovery failed (err=%d)\n", ret);
+		goto EXIT;
+	}
+	for (int i = 0; i < svc_count; i++) {
+		gattlib_uuid_to_string(&services[i].uuid, uuid_str, sizeof(uuid_str));
+		printf("  service[%d] start:0x%04x end:0x%04x uuid:%s\n", i,
+		       services[i].attr_handle_start,
+		       services[i].attr_handle_end, uuid_str);
+	}
 
-	/* Step 6: Get CCCD handle */
-	unsigned int cccd_handle;
-	printf("\nEnter CCCD handle (hex, e.g. 005D): ");
-	fflush(stdout);
-	if (scanf("%x", &cccd_handle) != 1) {
-		fprintf(stderr, "Invalid handle.\n");
+	/* Step 6: Discover characteristics */
+	printf("\n=== Characteristics ===\n");
+	ret = gattlib_discover_char(g_connection, &chars, &char_count);
+	if (ret != GATTLIB_SUCCESS) {
+		fprintf(stderr, "Error: Characteristic discovery failed (err=%d)\n", ret);
+		goto EXIT;
+	}
+	for (int i = 0; i < char_count; i++) {
+		gattlib_uuid_to_string(&chars[i].uuid, uuid_str, sizeof(uuid_str));
+		printf("  char[%d] handle:0x%04x uuid:%s [",
+		       i, chars[i].value_handle, uuid_str);
+		if (chars[i].properties & GATTLIB_CHARACTERISTIC_READ)       printf(" READ");
+		if (chars[i].properties & GATTLIB_CHARACTERISTIC_WRITE)      printf(" WRITE");
+		if (chars[i].properties & GATTLIB_CHARACTERISTIC_NOTIFY)     printf(" NOTIFY");
+		if (chars[i].properties & GATTLIB_CHARACTERISTIC_INDICATE)   printf(" INDICATE");
+		printf(" ]\n");
+	}
+
+	/* Step 7: Filter characteristics with NOTIFY/INDICATE (like Python version) */
+	int cccd_indices[MAX_CHARS];
+	int cccd_count = 0;
+
+	printf("\n=== Characteristics with NOTIFY/INDICATE support ===\n");
+	for (int i = 0; i < char_count; i++) {
+		uint8_t props = chars[i].properties;
+		if ((props & GATTLIB_CHARACTERISTIC_NOTIFY) ||
+		    (props & GATTLIB_CHARACTERISTIC_INDICATE)) {
+			gattlib_uuid_to_string(&chars[i].uuid, uuid_str, sizeof(uuid_str));
+			printf("  %d: %s (Handle: 0x%04X) [",
+			       cccd_count, uuid_str, chars[i].value_handle);
+			if (props & GATTLIB_CHARACTERISTIC_NOTIFY)   printf(" NOTIFY");
+			if (props & GATTLIB_CHARACTERISTIC_INDICATE)  printf(" INDICATE");
+			printf(" ]\n");
+			cccd_indices[cccd_count++] = i;
+		}
+	}
+
+	if (cccd_count == 0) {
+		fprintf(stderr, "No characteristics with NOTIFY/INDICATE found.\n");
 		goto EXIT;
 	}
 
-	/* Step 7: Write CCCD = 0x0002 (Enable Indication) */
-	printf("\n=== Setting CCCD to 0x0002 (Enable Indication) ===\n");
-	ret = write_cccd(g_connection, (uint16_t)cccd_handle, CCCD_INDICATE);
-	if (ret != 0) {
+	/* Step 8: Select characteristic (like Python version) */
+	int char_idx;
+	printf("\nEnter characteristic number for CCCD setting: ");
+	fflush(stdout);
+	if (scanf("%d", &char_idx) != 1 || char_idx < 0 || char_idx >= cccd_count) {
+		fprintf(stderr, "Invalid selection.\n");
 		goto EXIT;
+	}
+
+	int selected = cccd_indices[char_idx];
+	uint16_t value_handle = chars[selected].value_handle;
+
+	/* Calculate CCCD handle:
+	 * CCCD is at value_handle + 1, unless Extended Properties exists,
+	 * then it's at value_handle + 2.
+	 * Check if next characteristic's handle leaves room. */
+	uint16_t cccd_handle;
+	if (selected + 1 < char_count) {
+		/* Gap between this char's value handle and next char's declaration */
+		uint16_t next_handle = chars[selected + 1].value_handle;
+		if (next_handle - value_handle >= 3) {
+			/* Room for Extended Properties + CCCD */
+			cccd_handle = value_handle + 2;
+		} else {
+			cccd_handle = value_handle + 1;
+		}
+	} else {
+		/* Last characteristic — use service end handle to check */
+		cccd_handle = value_handle + 1;
+		for (int i = 0; i < svc_count; i++) {
+			if (value_handle >= services[i].attr_handle_start &&
+			    value_handle <= services[i].attr_handle_end) {
+				if (services[i].attr_handle_end - value_handle >= 2) {
+					cccd_handle = value_handle + 2;
+				}
+				break;
+			}
+		}
+	}
+
+	gattlib_uuid_to_string(&chars[selected].uuid, uuid_str, sizeof(uuid_str));
+	printf("\nSelected: %s (Value Handle: 0x%04X, CCCD Handle: 0x%04X)\n",
+	       uuid_str, value_handle, cccd_handle);
+
+	/* Step 9: Write CCCD = 0x0002 (Enable Indication) */
+	printf("\n=== Setting CCCD to 0x0002 (Enable Indication) ===\n");
+	ret = write_cccd(g_connection, cccd_handle, CCCD_INDICATE);
+	if (ret != 0) {
+		/* Try fallback handle */
+		uint16_t alt = (cccd_handle == value_handle + 2) ?
+		               value_handle + 1 : value_handle + 2;
+		printf("Trying alternative handle 0x%04X...\n", alt);
+		ret = write_cccd(g_connection, alt, CCCD_INDICATE);
+		if (ret != 0) {
+			goto EXIT;
+		}
+		cccd_handle = alt;
 	}
 	printf("\n=== CCCD set to 0x0002 successfully! ===\n");
 
-	/* Step 8: Restore CCCD = 0x0000 (Disable) */
+	/* Step 10: Restore CCCD = 0x0000 */
 	printf("\nDisabling CCCD (setting to 0x0000)...\n");
-	write_cccd(g_connection, (uint16_t)cccd_handle, CCCD_DISABLE);
+	write_cccd(g_connection, cccd_handle, CCCD_DISABLE);
 
 EXIT:
+	if (services) free(services);
+	if (chars) free(chars);
+
 	printf("\nDisconnecting...\n");
 	gattlib_disconnect(g_connection, false);
+	g_connection = NULL;
 	gattlib_adapter_close(adapter);
+	g_adapter = NULL;
 	printf("Done.\n");
 
 	return NULL;
