@@ -43,11 +43,22 @@ static pthread_mutex_t g_conn_mutex = PTHREAD_MUTEX_INITIALIZER;
 static gattlib_connection_t *g_connection = NULL;
 static int g_conn_error = -1;
 
-/* Signal handling */
-static volatile int g_running = 1;
+/* For clean Ctrl+C shutdown */
+static gattlib_adapter_t *g_adapter = NULL;
 
 static void sigint_handler(int sig) {
-	g_running = 0;
+	printf("\n\nCaught SIGINT, cleaning up...\n");
+
+	if (g_connection != NULL) {
+		gattlib_disconnect(g_connection, false);
+		g_connection = NULL;
+	}
+	if (g_adapter != NULL) {
+		gattlib_adapter_close(g_adapter);
+		g_adapter = NULL;
+	}
+
+	exit(0);
 }
 
 /**
@@ -90,18 +101,6 @@ static void on_device_connect(gattlib_adapter_t *adapter, const char *dst,
 	g_conn_error = error;
 	pthread_cond_signal(&g_conn_cond);
 	pthread_mutex_unlock(&g_conn_mutex);
-}
-
-/**
- * Callback: notification/indication received.
- */
-static void on_notification(const uuid_t *uuid, const uint8_t *data,
-                             size_t len, void *user_data) {
-	printf("[Indication] Data (%zu bytes): ", len);
-	for (size_t i = 0; i < len; i++) {
-		printf("%02X ", data[i]);
-	}
-	printf("\n");
 }
 
 /**
@@ -195,6 +194,7 @@ static void *ble_task(void *arg) {
 		fprintf(stderr, "Error: Failed to open adapter (err=%d)\n", ret);
 		return NULL;
 	}
+	g_adapter = adapter;
 
 	/* Step 2: Scan */
 	printf("=== Scanning for BLE devices (%d seconds) ===\n", SCAN_TIMEOUT);
@@ -269,17 +269,9 @@ static void *ble_task(void *arg) {
 	if (ret != 0) {
 		goto EXIT;
 	}
+	printf("\n=== CCCD set to 0x0002 successfully! ===\n");
 
-	/* Step 8: Register notification handler and wait */
-	gattlib_register_notification(g_connection, on_notification, NULL);
-
-	printf("\nWaiting for indications (press Ctrl+C to stop)...\n");
-	fflush(stdout);
-	while (g_running) {
-		g_usleep(1 * G_USEC_PER_SEC);
-	}
-
-	/* Step 9: Disable CCCD */
+	/* Step 8: Restore CCCD = 0x0000 (Disable) */
 	printf("\nDisabling CCCD (setting to 0x0000)...\n");
 	write_cccd(g_connection, (uint16_t)cccd_handle, CCCD_DISABLE);
 
