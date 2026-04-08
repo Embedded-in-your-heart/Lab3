@@ -161,7 +161,9 @@ static void *ble_task(void *arg) {
 
 	/* Step 4: Connect (async) */
 	ret = gattlib_connect(adapter, discovered_addr[num],
-	                       GATTLIB_CONNECTION_OPTIONS_NONE,
+	                       GATTLIB_CONNECTION_OPTIONS_LEGACY_BDADDR_LE_PUBLIC |
+	                       GATTLIB_CONNECTION_OPTIONS_LEGACY_BDADDR_LE_RANDOM |
+	                       GATTLIB_CONNECTION_OPTIONS_LEGACY_BT_SEC_LOW,
 	                       on_device_connect, NULL);
 	if (ret != GATTLIB_SUCCESS) {
 		fprintf(stderr, "Error: Connection request failed (err=%d)\n", ret);
