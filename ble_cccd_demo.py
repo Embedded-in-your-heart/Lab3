@@ -68,44 +68,65 @@ def scan_devices(duration=10.0):
 
 
 def list_services_and_chars(peripheral):
-    """List all services and characteristics of the connected device."""
+    """List all services and characteristics of the connected device.
+    Returns list of (characteristic, svc_end_handle) tuples."""
     print("\n=== Services and Characteristics ===")
-    svc_list = []
     char_list = []
 
     for svc in peripheral.services:
         print("\nService: %s" % str(svc))
-        svc_list.append(svc)
+        svc_end = svc.hndEnd
         for ch in svc.getCharacteristics():
             props = ch.propertiesToString()
             print("  Char: %s (Handle: 0x%04X) Properties: %s" %
                   (str(ch.uuid), ch.getHandle(), props))
-            char_list.append(ch)
+            char_list.append((ch, svc_end))
 
             if "NOTIFY" in props or "INDICATE" in props:
-                print("    -> Supports CCCD (Handle: 0x%04X)" %
-                      (ch.getHandle() + 1))
+                print("    -> Supports CCCD")
 
     return char_list
 
 
-def find_cccd_characteristics(peripheral, char_list):
+def find_cccd_characteristics(char_list):
     """Find characteristics that have CCCD descriptors (support notify/indicate)."""
     cccd_chars = []
-    for ch in char_list:
+    for ch, svc_end in char_list:
         props = ch.propertiesToString()
         if "NOTIFY" in props or "INDICATE" in props:
-            cccd_chars.append(ch)
+            cccd_chars.append((ch, svc_end))
     return cccd_chars
 
 
-def set_cccd(peripheral, char_handle, value):
+def find_cccd_handle(peripheral, char_handle, svc_end_handle):
+    """
+    Search for the CCCD descriptor (UUID 0x2902) in the handle range
+    after the characteristic value. Falls back to char_handle + 1.
+    """
+    try:
+        descs = peripheral.getDescriptors(char_handle + 1, svc_end_handle)
+        for desc in descs:
+            if desc.uuid == CCCD_UUID:
+                print("  Found CCCD at handle 0x%04X" % desc.handle)
+                return desc.handle
+    except Exception:
+        pass
+
+    # Fallback
+    fallback = char_handle + 1
+    print("  CCCD not found via descriptor search, using fallback handle 0x%04X" % fallback)
+    return fallback
+
+
+def set_cccd(peripheral, char_handle, value, svc_end_handle=None):
     """
     Set the CCCD value for a characteristic.
-    Assumes CCCD descriptor is at char_value_handle + 1,
-    which is the common layout for most BLE peripherals.
+    Searches for the actual CCCD descriptor handle.
     """
-    cccd_handle = char_handle + 1
+    if svc_end_handle:
+        cccd_handle = find_cccd_handle(peripheral, char_handle, svc_end_handle)
+    else:
+        cccd_handle = char_handle + 1
 
     # Pack the value as little-endian uint16
     cccd_value = struct.pack('<H', value)
@@ -160,27 +181,28 @@ def main():
         char_list = list_services_and_chars(peripheral)
 
         # Step 5: Find characteristics with CCCD (notify/indicate support)
-        cccd_chars = find_cccd_characteristics(peripheral, char_list)
+        cccd_chars = find_cccd_characteristics(char_list)
 
         if not cccd_chars:
             print("\nNo characteristics with NOTIFY/INDICATE property found.")
             print("Listing all characteristics for manual selection:")
-            for i, ch in enumerate(char_list):
+            for i, (ch, svc_end) in enumerate(char_list):
                 print("  %d: %s (Handle: 0x%04X) %s" %
                       (i, ch.uuid, ch.getHandle(), ch.propertiesToString()))
             char_idx = int(input("Enter characteristic number: "))
-            selected_char = char_list[char_idx]
+            selected_char, selected_svc_end = char_list[char_idx]
         else:
             print("\n=== Characteristics with NOTIFY/INDICATE support ===")
-            for i, ch in enumerate(cccd_chars):
+            for i, (ch, svc_end) in enumerate(cccd_chars):
                 print("  %d: %s (Handle: 0x%04X) %s" %
                       (i, ch.uuid, ch.getHandle(), ch.propertiesToString()))
             char_idx = int(input("Enter characteristic number for CCCD setting: "))
-            selected_char = cccd_chars[char_idx]
+            selected_char, selected_svc_end = cccd_chars[char_idx]
 
         # Step 6: Set CCCD to 0x0002 (Enable Indication)
         print("\n=== Setting CCCD to 0x0002 (Enable Indication) ===")
-        success = set_cccd(peripheral, selected_char.getHandle(), CCCD_INDICATE)
+        success = set_cccd(peripheral, selected_char.getHandle(),
+                           CCCD_INDICATE, selected_svc_end)
 
         if success:
             print("\n=== CCCD set to 0x0002 successfully! ===")
@@ -197,7 +219,8 @@ def main():
 
             # Step 8: Optionally reset CCCD to 0x0000
             print("\nDisabling CCCD (setting to 0x0000)...")
-            set_cccd(peripheral, selected_char.getHandle(), CCCD_DISABLE)
+            set_cccd(peripheral, selected_char.getHandle(),
+                     CCCD_DISABLE, selected_svc_end)
 
     finally:
         print("\nDisconnecting...")
