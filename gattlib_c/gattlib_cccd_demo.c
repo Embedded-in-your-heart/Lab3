@@ -165,12 +165,13 @@ static void *ble_task(void *arg) {
 
 	/* Step 3: Select device */
 	int num;
-	printf("\nEnter device number to connect: ");
-	fflush(stdout);
-	if (scanf("%d", &num) != 1 || num < 0 || num >= device_count) {
-		fprintf(stderr, "Invalid selection.\n");
-		gattlib_adapter_close(adapter);
-		return NULL;
+	while (1) {
+		printf("\nEnter device number to connect (0-%d): ", device_count - 1);
+		fflush(stdout);
+		if (scanf("%d", &num) == 1 && num >= 0 && num < device_count)
+			break;
+		printf("Invalid number. Please try again.\n");
+		while (getchar() != '\n');  /* clear input buffer */
 	}
 
 	printf("\nConnecting to %s (%s)...\n",
@@ -257,11 +258,13 @@ static void *ble_task(void *arg) {
 
 	/* Step 8: Select characteristic (like Python version) */
 	int char_idx;
-	printf("\nEnter characteristic number for CCCD setting: ");
-	fflush(stdout);
-	if (scanf("%d", &char_idx) != 1 || char_idx < 0 || char_idx >= cccd_count) {
-		fprintf(stderr, "Invalid selection.\n");
-		goto EXIT;
+	while (1) {
+		printf("\nEnter characteristic number for CCCD setting (0-%d): ", cccd_count - 1);
+		fflush(stdout);
+		if (scanf("%d", &char_idx) == 1 && char_idx >= 0 && char_idx < cccd_count)
+			break;
+		printf("Invalid number. Please try again.\n");
+		while (getchar() != '\n');
 	}
 
 	int selected = cccd_indices[char_idx];

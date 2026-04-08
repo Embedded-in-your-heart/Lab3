@@ -26,9 +26,15 @@ for n, dev in enumerate(devices):
     for (adtype, desc, value) in dev.getScanData():
         print("  %s = %s" % (desc, value))
 
-number = input('Enter your device number: ')
-print('Device', number)
-num = int(number)
+while True:
+    try:
+        num = int(input('Enter your device number: '))
+        if 0 <= num < len(addr):
+            break
+        print("Invalid number. Please enter 0-%d." % (len(addr) - 1))
+    except ValueError:
+        print("Please enter a valid number.")
+print('Device', num)
 print(addr[num])
 
 print("Connecting...")

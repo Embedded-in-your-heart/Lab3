@@ -164,8 +164,14 @@ def main():
 
     # Step 2: Select a device
     print("\n" + "=" * 50)
-    number = input("Enter device number to connect: ")
-    num = int(number)
+    while True:
+        try:
+            num = int(input("Enter device number to connect: "))
+            if 0 <= num < len(dev_list):
+                break
+            print("Invalid number. Please enter 0-%d." % (len(dev_list) - 1))
+        except ValueError:
+            print("Please enter a valid number.")
     target_dev = dev_list[num]
 
     print("\nConnecting to %s [%s]..." %
@@ -189,14 +195,28 @@ def main():
             for i, (ch, svc_end) in enumerate(char_list):
                 print("  %d: %s (Handle: 0x%04X) %s" %
                       (i, ch.uuid, ch.getHandle(), ch.propertiesToString()))
-            char_idx = int(input("Enter characteristic number: "))
+            while True:
+                try:
+                    char_idx = int(input("Enter characteristic number: "))
+                    if 0 <= char_idx < len(char_list):
+                        break
+                    print("Invalid. Please enter 0-%d." % (len(char_list) - 1))
+                except ValueError:
+                    print("Please enter a valid number.")
             selected_char, selected_svc_end = char_list[char_idx]
         else:
             print("\n=== Characteristics with NOTIFY/INDICATE support ===")
             for i, (ch, svc_end) in enumerate(cccd_chars):
                 print("  %d: %s (Handle: 0x%04X) %s" %
                       (i, ch.uuid, ch.getHandle(), ch.propertiesToString()))
-            char_idx = int(input("Enter characteristic number for CCCD setting: "))
+            while True:
+                try:
+                    char_idx = int(input("Enter characteristic number for CCCD setting: "))
+                    if 0 <= char_idx < len(cccd_chars):
+                        break
+                    print("Invalid. Please enter 0-%d." % (len(cccd_chars) - 1))
+                except ValueError:
+                    print("Please enter a valid number.")
             selected_char, selected_svc_end = cccd_chars[char_idx]
 
         # Step 6: Set CCCD to 0x0002 (Enable Indication)
