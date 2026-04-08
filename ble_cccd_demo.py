@@ -82,11 +82,9 @@ def list_services_and_chars(peripheral):
                   (str(ch.uuid), ch.getHandle(), props))
             char_list.append(ch)
 
-            # Check if this characteristic has a CCCD descriptor
-            descriptors = ch.getDescriptors(forUUID=CCCD_UUID)
-            for desc in descriptors:
-                print("    -> CCCD Descriptor found (Handle: 0x%04X)" %
-                      desc.handle)
+            if "NOTIFY" in props or "INDICATE" in props:
+                print("    -> Supports CCCD (Handle: 0x%04X)" %
+                      (ch.getHandle() + 1))
 
     return char_list
 
